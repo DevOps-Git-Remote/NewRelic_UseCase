@@ -3,4 +3,4 @@ uvicorn
 requests
 msal
 pydantic-settings
-mcp
+mcp[cli]
