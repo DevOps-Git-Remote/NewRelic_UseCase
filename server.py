@@ -183,8 +183,6 @@ def format_recipients(email_string: str) -> list:
     raw_emails = email_string.replace(',', ';').split(';')
     return [{"emailAddress": {"address": email.strip()}} for email in raw_emails if email.strip()]
 
-# Expose the Starlette/SSE app instance that FastMCP builds natively
-app = mcp._sse_app
 
 if __name__ == "__main__":
     # FastMCP handles its own server runner on the designated port
