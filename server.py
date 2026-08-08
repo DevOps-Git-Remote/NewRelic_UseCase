@@ -8,28 +8,39 @@ from mcp.server.fastmcp import FastMCP
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server
-mcp = FastMCP("M365-Incident-Notifier")
+# Read PORT before constructing FastMCP - the official mcp SDK needs
+# host/port set at construction time, not passed to .run()
+PORT = int(os.environ.get("PORT", 8000))
+
+# Initialize FastMCP server - host must be 0.0.0.0 for Render (or any
+# platform) to route external traffic to this process
+mcp = FastMCP("M365-Incident-Notifier", host="0.0.0.0", port=PORT)
+
+# --- Secrets: load from environment, never hardcode ---
+ tenant_id = "71ced5a9-db6d-473d-a0f5-ef0d7c4f6970"
+client_id = "43f61d12-2f59-4bba-9261-efa0be982e89"
+ client_secret = "JFV8Q~mwFh-4Wv.jtoQ1Jr6TWibEmvsQRkkWXaMe" 
+    
+    sender_email = "ServiceNow-Learnings@w422w.onmicrosoft.com"
+
 
 @mcp.tool()
 def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
     """
     Automates an incident triage alert for a given EPRID.
-    Fetches dynamic routing config from SharePoint Excel and dispatches 
+    Fetches dynamic routing config from SharePoint Excel and dispatches
     alerts via Outlook (Email) and Power Automate Webhooks (Teams).
     """
-    tenant_id = "71ced5a9-db6d-473d-a0f5-ef0d7c4f6970"
-    client_id = "43f61d12-2f59-4bba-9261-efa0be982e89"
-    client_secret = "JFV8Q~mwFh-4Wv.jtoQ1Jr6TWibEmvsQRkkWXaMe" 
-    
-    sender_email = "ServiceNow-Learnings@w422w.onmicrosoft.com"
-    
-    # 1. Authenticate 
+    # 1. Authenticate
     try:
-        authority = f"https://login.microsoftonline.com/{tenant_id}"
-        app = msal.ConfidentialClientApplication(client_id, authority=authority, client_credential=client_secret)
-        token_response = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
-        
+        authority = f"https://login.microsoftonline.com/{TENANT_ID}"
+        app = msal.ConfidentialClientApplication(
+            CLIENT_ID, authority=authority, client_credential=CLIENT_SECRET
+        )
+        token_response = app.acquire_token_for_client(
+            scopes=["https://graph.microsoft.com/.default"]
+        )
+
         if "access_token" not in token_response:
             return json.dumps({"status": "ERROR", "message": "Authentication failed with Microsoft Graph."})
     except Exception as e:
@@ -42,7 +53,7 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
 
     # 2. Fetch Dynamic Data from SharePoint Excel
     excel_fields = get_excel_routing_config(eprid, headers)
-    
+
     if excel_fields and "_error" in excel_fields:
         return json.dumps({
             "status": "ERROR",
@@ -64,15 +75,15 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
         },
         "saveToSentItems": "false"
     }
-    
+
     cc_recipients = format_recipients(cc_emails_str)
     if cc_recipients:
         email_payload["message"]["ccRecipients"] = cc_recipients
 
     # 4. Dispatch Email
     email_status = "Skipped"
-    send_mail_url = f"https://graph.microsoft.com/v1.0/users/{sender_email}/sendMail"
-    
+    send_mail_url = f"https://graph.microsoft.com/v1.0/users/{SENDER_EMAIL}/sendMail"
+
     try:
         response = requests.post(send_mail_url, headers=headers, json=email_payload)
         response.raise_for_status()
@@ -81,7 +92,7 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
         error_details = e.response.text if hasattr(e, 'response') and e.response else str(e)
         logger.error(f"Failed to send email: {error_details}")
         email_status = f"FAILED: {error_details}"
-        
+
     # 5. Dispatch to Teams via Power Automate Webhook
     teams_status = "Skipped (No valid webhook URL found)"
     if channel_workflow.startswith("http"):
@@ -104,7 +115,7 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
                 }
             ]
         }
-        
+
         try:
             webhook_response = requests.post(channel_workflow, json=teams_payload, timeout=10)
             webhook_response.raise_for_status()
@@ -127,32 +138,33 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
             "teams_webhook_triggered": True if teams_status == "SUCCESS" else False
         }
     })
-    
+
+
 def get_excel_routing_config(eprid: str, headers: dict, sheet_name: str = "Sheet1") -> dict:
     """Safely resolves the Site ID first, then reads the Excel file."""
     try:
         site_url = "https://graph.microsoft.com/v1.0/sites/w422w.sharepoint.com:/sites/DXC-AI-Core"
         site_resp = requests.get(site_url, headers=headers)
-        
+
         if not site_resp.ok:
             return {"_error": f"Failed to resolve SharePoint Site: {site_resp.text}"}
-            
+
         site_id = site_resp.json().get("id")
 
         excel_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/team_routing.xlsx:/workbook/worksheets('{sheet_name}')/usedRange"
-        
+
         response = requests.get(excel_url, headers=headers)
         if not response.ok:
             return {"_error": f"Failed to read Excel file: HTTP {response.status_code} - {response.text}"}
-            
+
         data = response.json()
         values = data.get('text', [])
-        
+
         if not values or len(values) < 2:
             return {"_error": "Excel file is empty or only contains headers."}
-            
+
         headers_row = values[0]
-        
+
         try:
             eprid_idx = headers_row.index("EPRID")
             to_idx = headers_row.index("To")
@@ -171,11 +183,12 @@ def get_excel_routing_config(eprid: str, headers: dict, sheet_name: str = "Sheet
                     "CC": str(row[cc_idx]).strip() if len(row) > cc_idx else "",
                     "Channel": str(row[channel_idx]).strip() if len(row) > channel_idx else "Unknown_Workflow"
                 }
-                
+
         return {"_error": f"EPRID {eprid_clean} not found in the SharePoint Excel file."}
-        
+
     except Exception as e:
         return {"_error": f"Exception during Excel fetch: {str(e)}"}
+
 
 def format_recipients(email_string: str) -> list:
     if not email_string:
@@ -185,5 +198,5 @@ def format_recipients(email_string: str) -> list:
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    mcp.run(transport="sse", host="0.0.0.0", port=port)
+    # host/port were already set on the FastMCP() constructor above
+    mcp.run(transport="sse")
