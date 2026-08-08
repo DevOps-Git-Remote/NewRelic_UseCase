@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+requests
+msal
+pydantic-settings
+mcp
