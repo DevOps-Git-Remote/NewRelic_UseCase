@@ -2,21 +2,29 @@ import json
 import requests
 import msal
 import logging
-from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the FastMCP server
-mcp = FastMCP("M365-Incident-Notifier")
+# Initialize standard FastAPI app for Render
+app = FastAPI(title="M365-Incident-Notifier")
 
-@mcp.tool()
-def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
+class IncidentRequest(BaseModel):
+    eprid: str
+    email_body: str
+
+@app.post("/notify")
+def notify_team_via_m365_graph(payload: IncidentRequest) -> dict:
     """
     Automates an incident triage alert for a given EPRID.
     Fetches dynamic routing config from SharePoint Excel and dispatches 
     alerts via Outlook (Email) and Power Automate Webhooks (Teams).
     """
+    eprid = payload.eprid
+    email_body = payload.email_body
+    
     tenant_id = "71ced5a9-db6d-473d-a0f5-ef0d7c4f6970"
     client_id = "43f61d12-2f59-4bba-9261-efa0be982e89"
     client_secret = "JFV8Q~mwFh-4Wv.jtoQ1Jr6TWibEmvsQRkkWXaMe" 
@@ -26,13 +34,13 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
     # 1. Authenticate 
     try:
         authority = f"https://login.microsoftonline.com/{tenant_id}"
-        app = msal.ConfidentialClientApplication(client_id, authority=authority, client_credential=client_secret)
-        token_response = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        msal_app = msal.ConfidentialClientApplication(client_id, authority=authority, client_credential=client_secret)
+        token_response = msal_app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
         
         if "access_token" not in token_response:
-            return json.dumps({"status": "ERROR", "message": "Authentication failed with Microsoft Graph."})
+            return {"status": "ERROR", "message": "Authentication failed with Microsoft Graph."}
     except Exception as e:
-        return json.dumps({"status": "ERROR", "message": f"MSAL Auth Error: {str(e)}"})
+        return {"status": "ERROR", "message": f"MSAL Auth Error: {str(e)}"}
 
     headers = {
         "Authorization": f"Bearer {token_response['access_token']}",
@@ -43,10 +51,10 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
     excel_fields = get_excel_routing_config(eprid, headers)
     
     if excel_fields and "_error" in excel_fields:
-        return json.dumps({
+        return {
             "status": "ERROR",
             "message": f"SHAREPOINT FETCH FAILED: {excel_fields['_error']}"
-        })
+        }
 
     to_emails_str = excel_fields.get("To")
     cc_emails_str = excel_fields.get("CC", "")
@@ -115,9 +123,9 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
 
     # 6. Return Final Delivery Report
     if "FAILED" in email_status and "FAILED" in teams_status:
-        return json.dumps({"status": "ERROR", "message": f"Both Email and Teams dispatches failed. Email: {email_status} | Teams: {teams_status}"})
+        return {"status": "ERROR", "message": f"Both Email and Teams dispatches failed. Email: {email_status} | Teams: {teams_status}"}
 
-    return json.dumps({
+    return {
         "status": "SUCCESS",
         "message": f"Dispatch complete for EPRID {eprid}. Email: {email_status} | Teams: {teams_status}",
         "delivery_details": {
@@ -125,7 +133,7 @@ def notify_team_via_m365_graph(eprid: str, email_body: str) -> str:
             "cc": cc_emails_str,
             "teams_webhook_triggered": True if teams_status == "SUCCESS" else False
         }
-    })
+    }
     
 def get_excel_routing_config(eprid: str, headers: dict, sheet_name: str = "Sheet1") -> dict:
     """Safely resolves the Site ID first, then reads the Excel file."""
@@ -182,9 +190,6 @@ def format_recipients(email_string: str) -> list:
     raw_emails = email_string.replace(',', ';').split(';')
     return [{"emailAddress": {"address": email.strip()}} for email in raw_emails if email.strip()]
 
-# Expose the underlying FastAPI app for Render / Uvicorn deployment
-# Expose the underlying FastAPI app for Render / Uvicorn deployment
-app = mcp.app
-
-if __name__ == "__main__":
-    mcp.run()
+@app.get("/")
+def health_check():
+    return {"status": "online"}
