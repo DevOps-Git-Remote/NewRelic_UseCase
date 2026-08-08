@@ -2,6 +2,7 @@ import json
 import requests
 import msal
 import logging
+import os
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -186,4 +187,6 @@ def format_recipients(email_string: str) -> list:
 app = mcp._sse_app
 
 if __name__ == "__main__":
-    mcp.run()
+    # FastMCP handles its own server runner on the designated port
+    port = int(os.environ.get("PORT", 8000))
+    mcp.run(transport="sse")
