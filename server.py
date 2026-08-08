@@ -17,11 +17,11 @@ PORT = int(os.environ.get("PORT", 8000))
 mcp = FastMCP("M365-Incident-Notifier", host="0.0.0.0", port=PORT)
 
 # --- Secrets: load from environment, never hardcode ---
- tenant_id = "71ced5a9-db6d-473d-a0f5-ef0d7c4f6970"
+tenant_id = "71ced5a9-db6d-473d-a0f5-ef0d7c4f6970"
 client_id = "43f61d12-2f59-4bba-9261-efa0be982e89"
- client_secret = "JFV8Q~mwFh-4Wv.jtoQ1Jr6TWibEmvsQRkkWXaMe" 
+client_secret = "JFV8Q~mwFh-4Wv.jtoQ1Jr6TWibEmvsQRkkWXaMe" 
     
-    sender_email = "ServiceNow-Learnings@w422w.onmicrosoft.com"
+sender_email = "ServiceNow-Learnings@w422w.onmicrosoft.com"
 
 
 @mcp.tool()
