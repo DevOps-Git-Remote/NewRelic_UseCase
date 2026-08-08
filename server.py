@@ -183,7 +183,8 @@ def format_recipients(email_string: str) -> list:
     return [{"emailAddress": {"address": email.strip()}} for email in raw_emails if email.strip()]
 
 # Expose the underlying FastAPI app for Render / Uvicorn deployment
-app = mcp._app
+# Expose the underlying FastAPI app for Render / Uvicorn deployment
+app = mcp.app
 
 if __name__ == "__main__":
     mcp.run()
